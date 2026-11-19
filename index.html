@@ -2,8 +2,17 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src blob: data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; upgrade-insecure-requests">
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>Кубия 1.0</title>
+<title>Кубия</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="theme-color" content="#0b1a2a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Кубия">
 <style>
 :root{--glass:rgba(12,22,38,.72);--glass2:rgba(20,34,56,.82);--line:rgba(160,200,255,.18);--acc:#4f9bff;--acc2:#2f6fd6;--gold:#ffd34a}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
@@ -50,6 +59,14 @@ button:disabled{opacity:.45}
 .box .li{font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.08);opacity:.9}
 .shop{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.1)}
 .shop button{font-size:13px;min-height:34px}
+
+.box textarea{width:100%;background:#0c1626;color:#eaf1ff;border:1px solid var(--line);border-radius:12px;padding:10px;font:inherit;font-size:14px;resize:none;-webkit-user-select:text;user-select:text;touch-action:auto}
+.ideasMsg{min-height:18px;font-size:12px;margin:4px 0}.ideasMsg.ok{color:#7be29a}.ideasMsg.err{color:#ff8a8a}
+.ideaCard{display:flex;gap:6px;align-items:flex-start;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.08)}
+.ideaCard .tx{flex:1;font-size:13px;line-height:1.35;word-break:break-word}.ideaCard .meta{font-size:10px;opacity:.55;margin-top:2px}
+.ideaCard button{padding:5px 8px;font-size:12px}.ideaCard button.on{background:var(--acc2)}
+.ideasList{max-height:34vh;overflow:auto}
+.updBar{position:fixed;left:50%;top:max(10px,env(safe-area-inset-top));transform:translateX(-50%);z-index:99;display:flex;gap:10px;align-items:center;background:#1a2c48;border:1px solid var(--acc);border-radius:14px;padding:8px 12px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.5)}
 </style>
 </head>
 <body>
@@ -79,11 +96,114 @@ button:disabled{opacity:.45}
 
 <script>
 'use strict';
+/* ═══════════════ БЕЗОПАСНОСТЬ ═══════════════ */
+if(location.protocol==='http:'&&!/^(localhost|127\.|\[::1\])/.test(location.hostname)){try{location.replace('https:'+location.href.slice(5));}catch(_e){/* редирект недоступен */}}
+const SEC=(()=>{
+ const ESCM={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'};
+ const esc=x=>String(x==null?'':x).replace(/[&<>"'`]/g,c=>ESCM[c]);
+ /* ── безопасная вставка HTML (белый список тегов/атрибутов) ── */
+ const TAGS=new Set(['DIV','SPAN','B','I','U','BR','SMALL','P','H2','H3','BUTTON','STRONG','EM','UL','LI','HR','LABEL']);
+ const ATTR=new Set(['class','title','data-o','data-id']);
+ const CALL=/^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\(\s*(?:-?\d{1,9}|'[\w \-]{0,40}'|true|false)?\s*\)$/;
+ const ASSIGN=/^[A-Za-z_$][\w$]*=(?:!?[A-Za-z_$][\w$]*|-?\d{1,9}|true|false)$/;
+ const FN=new Set(['Mus.setStyle','buyUpg','closeModal','menuContinue','menuDel','menuNew','pickGo','showKingdomPick','saveGame','showMenu','showSettings','IDEAS.open']);
+ const VARS=new Set(['pickSel','eventsOn']);
+ const okStmt=s=>{if(CALL.test(s))return FN.has(s.slice(0,s.indexOf('(')).trim());if(ASSIGN.test(s))return VARS.has(s.slice(0,s.indexOf('=')));return false;};
+ const okHandler=v=>v.length<160&&v.split(';').map(s=>s.trim()).filter(Boolean).every(okStmt);
+ const okStyle=v=>v.length<300&&/^[\w\s:;#.,%()\-]*$/.test(v)&&!/url\s*\(|expression|javascript|@import/i.test(v);
+ function clean(src,dst){
+  for(const n of Array.from(src.childNodes)){
+   if(n.nodeType===3){dst.appendChild(document.createTextNode(n.nodeValue));continue;}
+   if(n.nodeType!==1||!TAGS.has(n.tagName))continue;
+   const e=document.createElement(n.tagName.toLowerCase());
+   for(const a of Array.from(n.attributes)){
+    const k=a.name.toLowerCase(),val=a.value;
+    if(k==='onclick'){if(okHandler(val))e.setAttribute('onclick',val);}
+    else if(k==='style'){if(okStyle(val))e.setAttribute('style',val);}
+    else if(ATTR.has(k))e.setAttribute(k,val.slice(0,120));
+   }
+   clean(n,e);dst.appendChild(e);
+  }
+ }
+ const last=new WeakMap();
+ function clear(el){while(el.firstChild)el.removeChild(el.firstChild);last.delete(el);}
+ function setHTML(el,html){
+  html=String(html);if(last.get(el)===html&&el.firstChild)return;
+  const doc=new DOMParser().parseFromString('<!doctype html><body>'+html,'text/html');
+  const frag=document.createDocumentFragment();clean(doc.body,frag);
+  while(el.firstChild)el.removeChild(el.firstChild);
+  el.appendChild(frag);last.set(el,html);
+ }
+ /* ── ограничитель частоты действий ── */
+ const stamps=new Map();
+ function allow(key,ms){const n=Date.now(),p=stamps.get(key)||0;if(n-p<ms)return false;stamps.set(key,n);return true;}
+ /* ── логирование без утечки стека ── */
+ const dbg=false;
+ function log(tag,e){if(dbg)console.warn(tag,e&&e.message);}
+ /* ── целостность и обфускация сохранений ── */
+ function h53(s){let h1=0xdeadbeef,h2=0x41c6ce57;for(let i=0;i<s.length;i++){const ch=s.charCodeAt(i);h1=Math.imul(h1^ch,2654435761);h2=Math.imul(h2^ch,1597334677);}
+  h1=Math.imul(h1^(h1>>>16),2246822507)^Math.imul(h2^(h2>>>13),3266489909);h2=Math.imul(h2^(h2>>>16),2246822507)^Math.imul(h1^(h1>>>13),3266489909);
+  return (4294967296*(2097151&h2)+(h1>>>0)).toString(36);}
+ function devKey(){
+  try{let k=localStorage.getItem('kubiya_dk');if(k&&/^[0-9a-f]{32}$/.test(k))return k;
+   const a=new Uint8Array(16);(self.crypto||{getRandomValues:x=>{for(let i=0;i<x.length;i++)x[i]=(Date.now()+i*7919)%256;}}).getRandomValues(a);
+   k=Array.from(a,b=>b.toString(16).padStart(2,'0')).join('');localStorage.setItem('kubiya_dk',k);return k;}catch(_e){return '0'.repeat(32);}
+ }
+ function xor(bytes,key){const ks=new Uint8Array(key.length/2);for(let i=0;i<ks.length;i++)ks[i]=Number('0x'+key.substr(i*2,2));for(let i=0;i<bytes.length;i++)bytes[i]^=ks[i%ks.length]^((i*31)&255);return bytes;}
+ function b64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode.apply(null,bytes.subarray(i,i+8192));return btoa(s);}
+ function unb64(str){const s=atob(str),b=new Uint8Array(s.length);for(let i=0;i<s.length;i++)b[i]=s.charCodeAt(i);return b;}
+ const BAD=new Set(['__proto__','constructor','prototype']);
+ const reviver=(k,v)=>BAD.has(k)?undefined:v;
+ function pack(obj){const key=devKey(),json=JSON.stringify(obj),bytes=new TextEncoder().encode(json);return JSON.stringify({k:1,s:h53(json+key),p:b64(xor(bytes,key))});}
+ function unpack(raw){
+  if(typeof raw!=='string'||!raw||raw.length>12e6)return null;
+  const env=JSON.parse(raw,reviver);
+  if(env&&env.k===1&&typeof env.p==='string'){const key=devKey(),json=new TextDecoder().decode(xor(unb64(env.p),key));if(h53(json+key)!==env.s)return null;return JSON.parse(json,reviver);}
+  return env;   // старый формат (до защиты) — проходит ту же валидацию
+ }
+ /* ── валидация данных сохранения ── */
+ const isInt=(x,a,b)=>Number.isInteger(x)&&x>=a&&x<=b;
+ const num=(x,a,b,d)=>(typeof x==='number'&&Number.isFinite(x))?Math.min(b,Math.max(a,x)):d;
+ const str=(x,n)=>typeof x==='string'?x.replace(/[\u0000-\u001f<>"'`&]/g,'').slice(0,n):'';
+ function validate(d){
+  if(!d||typeof d!=='object'||d.v!==50)return null;
+  if(!isInt(d.cols,10,400)||!isInt(d.rows,10,400))return null;
+  const N=d.cols*d.rows;
+  for(const k of ['tiles','ore','ml'])if(typeof d[k]!=='string'||d[k].length!==N||/[^0-~]/.test(d[k]))return null;
+  for(const k of ['villages','trees','builds','beings','animals'])if(!Array.isArray(d[k])||d[k].length>60000)return null;
+  if(!d.res||typeof d.res!=='object'||!d.upg||typeof d.upg!=='object'||!Array.isArray(d.cam))return null;
+  // деревни
+  d.villages=d.villages.filter(v=>v&&typeof v==='object'&&isInt(v.id,0,1e7)).map(v=>{
+   v.name=str(v.name,40)||'Деревня';if(typeof v.color!=='string'||!/^#[0-9a-fA-F]{6}$/.test(v.color))v.color='#8a9ab0';
+   v.clan=v.clan===1?1:0;for(const k of ['wars','allies'])v[k]=Array.isArray(v[k])?v[k].filter(x=>isInt(x,0,1e7)).slice(0,60):[];
+   for(const k in v){const x=v[k];if(typeof x==='number'&&!Number.isFinite(x))v[k]=0;else if(typeof x==='string')v[k]=str(x,60);}
+   return v;});
+  d.trees=d.trees.filter(t=>Array.isArray(t)&&isInt(t[0],0,N-1)&&typeof t[1]==='string'&&t[1].length<12).map(t=>[t[0],str(t[1],12),num(t[2],0,99,3)]);
+  d.builds=d.builds.filter(b=>Array.isArray(b)&&BUILD[b[0]]&&isInt(b[1],1,BUILD[b[0]].hp.length)&&isInt(b[2],0,d.cols-1)&&isInt(b[3],0,d.rows-1)).map(b=>[b[0],b[1],b[2],b[3],num(b[4],0,1e5,1),num(b[5],-1,1e7,-1),num(b[6],0,60,0),num(b[7],0,1e4,10)]);
+  d.beings=d.beings.filter(o=>o&&typeof o==='object'&&BEING[o.t]).map(o=>{o.x=num(o.x,0,d.cols*26,0);o.y=num(o.y,0,d.rows*26,0);o.hp=num(o.hp,0,1e5,1);o.mh=num(o.mh,1,1e5,100);o.vid=num(o.vid,-1,1e7,-1);o.sex=o.sex===1?1:0;o.age=num(o.age,0,1e5,0);o.hu=num(o.hu,0,200,80);o.bc=num(o.bc,0,1e4,30);o.tt=num(o.tt,0,1e4,5);o.n=str(o.n,30);o.r=o.r==null?null:str(o.r,20);o.ad=!!o.ad;o.l=!!o.l;o.ex=!!o.ex;return o;});
+  d.animals=d.animals.filter(a=>Array.isArray(a)&&ANI[a[0]]).map(a=>[a[0],num(a[1],0,d.cols*26,0),num(a[2],0,d.rows*26,0),num(a[3],0,1e4,1)]);
+  for(const k of ['wood','food']){if(!Array.isArray(d.res[k]))return null;d.res[k]=d.res[k].slice(0,2).map(x=>num(x,0,1e9,0));}
+  for(const k of ['stone','iron','gold','diamond','emerald'])d.res[k]=num(d.res[k],0,1e9,0);
+  const u={};for(const k of ['pop','food','wood','stone'])u[k]=num(d.upg[k],0,10,0);d.upg=u;
+  d.cam=[num(d.cam[0],-1e5,1e5,0),num(d.cam[1],-1e5,1e5,0),num(d.cam[2],.3,8,1)];
+  d.wt=num(d.wt,0,1e9,0);d.pt=num(d.pt,0,1e9,0);d.speed=[1,2,3].includes(d.speed)?d.speed:1;d.nid=num(d.nid,1,1e9,1);d.nvid=num(d.nvid,1,1e9,1);d.pv=num(d.pv,0,1e7,1);d.pc=d.pc===1?1:0;
+  d.ev=Array.isArray(d.ev)?d.ev.slice(0,200).map(e=>str(e,160)):[];
+  return d;
+ }
+ function readSave(key){try{return validate(unpack(localStorage.getItem(key)));}catch(e){log('readSave',e);return null;}}
+ function writeSave(key,obj){localStorage.setItem(key,pack(obj));}
+ return {esc,setHTML,clear,allow,log,readSave,writeSave,validate};
+})();
+const esc=SEC.esc;
+const rand=(()=>{try{const a=new Uint32Array(1);crypto.getRandomValues(a);return rng32(a[0]);}catch(_e){return rng32((Date.now()^0x5bd1e995)>>>0);}})();
+window.addEventListener('unhandledrejection',e=>e.preventDefault());
+
 /* ═══════════════ КУБИЯ 4.0 — ПЕРЕЗАПУСК ═══════════════ */
-const APP_VERSION='1.0.0', SAVE_KEY='kubiya_save_v50';
+const APP_VERSION='1.0.1', SAVE_KEY='kubiya_save_v50';
 const T=26, BABY_TIME=45, DAY_LEN=180, MAX_GEN=5;
 const SIZES={island:[40,30,'Остров'],land:[64,46,'Материк'],cont:[90,65,'Континент'],world:[128,92,'Мир'],empire:[300,300,'Империя']};
 const CHANGELOG=[
+ ['1.0.1','Офлайн-режим и автообновление.','Игра работает без интернета (после первого запуска) и сама обновляется, сохранения не теряются.','Вкладка «💡 Идеи»: предлагай, что добавить в обновление 1.1. Идеи фильтруются от плохих слов и хранятся в памяти игры постоянно.','Исправления: безопасность, надёжность сохранений.'],
  ['1.0.0','Первый релиз «Кубии».','Режимы мира: Остров, Материк, Континент, Мир и «Империя» 300×300 с четырьмя королевствами и выбором страны.',
   'Новая графика: текстурные тайлы с плавными переходами биомов, живая вода и лава, спрайты зданий, деревьев и гор, тени облаков, ночное освещение, дым, дождь.',
   'Новые постройки: колодец, мельница, рынок, храм, казарма (вкладка «Стройка»).',
@@ -92,9 +212,9 @@ const CHANGELOG=[
   'Умный путь A*, фермы, шахты, лава, ИИ-дипломатия (войны, союзы, мир), сохранение.']
 ];
 const $=id=>document.getElementById(id);
-const rnd=(a,b)=>b===undefined?Math.random()*a:a+Math.random()*(b-a);
+const rnd=(a,b)=>b===undefined?rand()*a:a+rand()*(b-a);
 const randInt=(a,b)=>Math.floor(rnd(a,b+1));
-const pick=a=>a[Math.floor(Math.random()*a.length)];
+const pick=a=>a[Math.floor(rand()*a.length)];
 const cl=(v,a,b)=>v<a?a:v>b?b:v;
 const d2=(a,b)=>(a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y);
 
@@ -181,7 +301,7 @@ let camX=0,camY=0,zoom=1,W=800,H=600,DPR=1,cv=null,ctx=null;
 let insp=null,hash=new Map(),undoStack=[],skipT=new Map(),playerVid=0;
 let lavaD=null,lavaSet=new Set(),lavaT=0,playerClan=0,dipT=90,isEmpire=false,pausedByMenu=false,pickSel=0;
 const isMineTile=t=>t===2||t===6||t===7;
-function richOre(){const r=Math.random();return r<.3?1:r<.5?2:r<.8?3:r<.93?4:5;}
+function richOre(){const r=rand();return r<.3?1:r<.5?2:r<.8?3:r<.93?4:5;}
 const getV=id=>vmap.get(id);
 const inb=(x,y)=>x>=0&&y>=0&&x<COLS&&y<ROWS;
 const idxAtPx=(x,y)=>cl(Math.floor(y/T),0,ROWS-1)*COLS+cl(Math.floor(x/T),0,COLS-1);
@@ -205,7 +325,7 @@ function allocWorld(c,r){
  villages=[];vmap=new Map();nextVid=1;nextId=1;hash=new Map();skipT=new Map();undoStack=[];
  AS.g=new Float32Array(n);AS.par=new Int32Array(n);AS.st=new Int32Array(n);AS.cl=new Int32Array(n);AS.stamp=0;
 }
-function rollOre(){const r=Math.random();return r<.74?1:r<.89?2:r<.96?3:r<.99?4:5;}
+function rollOre(){const r=rand();return r<.74?1:r<.89?2:r<.96?3:r<.99?4:5;}
 
 function generateWorld(sizeKey){
  const [c,r]=SIZES[sizeKey]||SIZES.land;allocWorld(c,r);isEmpire=sizeKey==='empire';playerClan=0;const K=isEmpire?0.45:1;
@@ -238,7 +358,7 @@ function generateWorld(sizeKey){
   else if(t===0){p=0.045;kind=pick(['oak','birch','oak','apple']);}
   else if(t===9){p=0.05;kind='spruce';}
   else if(t===3){p=0.03;kind=pick(['palm','palm','cactus']);}
-  if(p&&Math.random()<p){
+  if(p&&rand()<p){
    const near=villages.some(v=>Math.hypot(v.cx-(x*T+13),v.cy-(y*T+13))<T*4.5);
    if(!near)plantTree(i,kind);
   }
@@ -247,7 +367,7 @@ function generateWorld(sizeKey){
  for(const s of seeds)seedVillage(s.v,s.p[0],s.p[1]);
  // животные
  const kinds=Object.keys(ANI);
- for(let i=0;i<c*r;i++){const t=tiles[i];if((t===0||t===8)&&!blk[i]&&Math.random()<(isEmpire?0.004:0.016))makeAnimal(pick(kinds),(i%c)*T+13,((i/c)|0)*T+13);}
+ for(let i=0;i<c*r;i++){const t=tiles[i];if((t===0||t===8)&&!blk[i]&&rand()<(isEmpire?0.004:0.016))makeAnimal(pick(kinds),(i%c)*T+13,((i/c)|0)*T+13);}
  camX=hv.cx-W/zoom/2;camY=hv.cy-H/zoom/2;clampCam();
  refreshStats();refreshCaps();buildMini();
 }
@@ -347,7 +467,7 @@ function destroyBuild(b,quiet){
 }
 function hitBuild(b,d,by,quiet){
  if(b.dead)return;b.hp-=d;
- if(!quiet&&Math.random()<.5)sparks.push({x:b.x+rnd(-8,8),y:b.y+rnd(-8,8),vx:rnd(-20,20),vy:rnd(-30,0),t:.4,c:'#e8c070',s:2});
+ if(!quiet&&rand()<.5)sparks.push({x:b.x+rnd(-8,8),y:b.y+rnd(-8,8),vx:rnd(-20,20),vy:rnd(-30,0),t:.4,c:'#e8c070',s:2});
  if(b.hp<=0)destroyBuild(b);
 }
 function upgradeBuild(b,pay){
@@ -389,19 +509,19 @@ function villageAI(v){
  if(v.pop>=16&&!cnt('temple')&&tryBuild(v,'temple'))return;
  if((v.wars.length||v.raid>0||v.pop>=18)&&cnt('barracks')<2&&tryBuild(v,'barracks'))return;
  const up=mine.filter(b=>b.lvl<maxLvl(b)&&b.constr<=0&&b.type!=='wallwood'&&b.type!=='wallstone'&&BUILD[b.type].cost[b.lvl]).sort((a,b)=>a.lvl-b.lvl);
- for(const b of up){if(Math.random()<0.5&&upgradeBuild(b,true))return;}
+ for(const b of up){if(rand()<0.5&&upgradeBuild(b,true))return;}
 }
 
 /* ───── существа ───── */
 function assignRole(u){
  if(u.leader){u.role='leader';return;}
  if(u.type==='warrior'||u.type==='archer'){u.role='warrior';return;}
- if(u.type==='human'||u.type==='traitor'){const r=Math.random();u.role=r<0.4?'lumberjack':r<0.65?'miner':r<0.85?'hunter':'lumberjack';}
- else if(u.type==='troll'){const r=Math.random();u.role=r<0.3?'lumberjack':r<0.5?'miner':r<0.65?'hunter':'warrior';}
+ if(u.type==='human'||u.type==='traitor'){const r=rand();u.role=r<0.4?'lumberjack':r<0.65?'miner':r<0.85?'hunter':'lumberjack';}
+ else if(u.type==='troll'){const r=rand();u.role=r<0.3?'lumberjack':r<0.5?'miner':r<0.65?'hunter':'warrior';}
 }
 function makeBeing(type,x,y,vid,o){
  const B=BEING[type];
- const u={id:nextId++,type,x,y,hp:B.hp,maxhp:B.hp,clan:B.clan,vid:vid,sex:Math.random()<.5?0:1,adult:true,age:0,hunger:rnd(60,100),breedCd:rnd(20,60),role:null,leader:false,isExposed:false,ttimer:rnd(6,14),atk:0,pcd:0,tcd:rnd(0,.4),face:1,size:B.size,name:genName(),path:null,pi:0,pgoal:-1,pfail:false,foe:null,act:'idle',idle:0,wt:0,wx:x,wy:y,work:null,wp:0,wcd:0,sk:.8,lx:x,ly:y,moving:false,partner:null,pt:0,bt:0,lastHit:null,dead:false,esc:0,victim:null,stuck:0,ex:0,ey:0,goal:null};
+ const u={id:nextId++,type,x,y,hp:B.hp,maxhp:B.hp,clan:B.clan,vid:vid,sex:rand()<.5?0:1,adult:true,age:0,hunger:rnd(60,100),breedCd:rnd(20,60),role:null,leader:false,isExposed:false,ttimer:rnd(6,14),atk:0,pcd:0,tcd:rnd(0,.4),face:1,size:B.size,name:genName(),path:null,pi:0,pgoal:-1,pfail:false,foe:null,act:'idle',idle:0,wt:0,wx:x,wy:y,work:null,wp:0,wcd:0,sk:.8,lx:x,ly:y,moving:false,partner:null,pt:0,bt:0,lastHit:null,dead:false,esc:0,victim:null,stuck:0,ex:0,ey:0,goal:null};
  u.fly=!!B.fly;if(o)Object.assign(u,o);
  if(u.adult&&!u.role)assignRole(u);
  beings.push(u);return u;
@@ -747,7 +867,7 @@ function updateBeing(u,dt){
  if(u.type==='traitor'&&!u.isExposed)traitorTick(u,dt,spd,v);
  else{
   if(u.foe&&(u.foe.dead||u.foe.hp<=0))u.foe=null;
-  if(u.tcd<=0){u.tcd=0.3+Math.random()*0.2;chooseFoe(u,v);}
+  if(u.tcd<=0){u.tcd=0.3+rand()*0.2;chooseFoe(u,v);}
   if(u.foe)combat(u,dt,spd);else behave(u,dt,spd,v);
  }
  u.sk-=dt;
@@ -794,7 +914,7 @@ function tickAnimals(dt){
    if(fl){const dx=a.x-fl.x,dy=a.y-fl.y,d=Math.hypot(dx,dy)||1;a.dx=dx/d;a.dy=dy/d;}
    if(!moveStraight(a,a.x+a.dx*40,a.y+a.dy*40,dt,A.spd*1.2)){a.dx=rnd(-1,1);a.dy=rnd(-1,1);}
   }else{
-   if(a.wt<=0){a.wt=rnd(2,6);const an=rnd(6.283);a.dx=Math.cos(an);a.dy=Math.sin(an);if(Math.random()<0.4){a.dx=0;a.dy=0;}}
+   if(a.wt<=0){a.wt=rnd(2,6);const an=rnd(6.283);a.dx=Math.cos(an);a.dy=Math.sin(an);if(rand()<0.4){a.dx=0;a.dy=0;}}
    if(a.dx||a.dy){if(!moveStraight(a,a.x+a.dx*30,a.y+a.dy*30,dt,A.spd*0.4))a.wt=0;}
   }
  }
@@ -824,7 +944,7 @@ function tickBuilds(dt){
    b.spawnT-=dt;
    if(b.spawnT<=0){b.spawnT=BUILD[b.type].spawn[b.lvl-1];
     if(v&&v.pop<Math.min(35,v.cap)&&popC[v.clan]<popLimit()){
-     const t=b.type==='tent'?'troll':(Math.random()<0.18?'warrior':'human');
+     const t=b.type==='tent'?'troll':(rand()<0.18?'warrior':'human');
      const u=spawnBeing(t,b.x,b.y+T*0.8,v);
      for(let k=0;k<3;k++)hearts.push({x:u.x+rnd(-6,6),y:u.y-8,t:1,vy:-18});
     }}
@@ -840,7 +960,7 @@ function tickBuilds(dt){
   }else if(b.type==='market'){b.prodT+=dt;if(b.prodT>=6){b.prodT=0;addRes('gold',b.clan,b.lvl*.6);}
   }else if(b.type==='temple'){b.prodT+=dt;if(b.prodT>=1){b.prodT=0;nearbyBeings(b.x,b.y,130,u=>{if(u.clan===b.clan&&u.hp<u.maxhp&&(u.vid===b.village||u.vid<0))u.hp=Math.min(u.maxhp,u.hp+4*b.lvl);});}
   }else if(b.type==='well'){b.prodT+=dt;if(b.prodT>=2){b.prodT=0;for(const i of Array.from(fires)){const fx=(i%COLS)*T+13,fy=((i/COLS)|0)*T+13;if(Math.hypot(fx-b.x,fy-b.y)<T*(3+b.lvl)){burn[i]=0;fires.delete(i);}}}
-  }else if(b.type==='barracks'){b.spawnT-=dt;if(b.spawnT<=0){b.spawnT=[40,28,20][b.lvl-1];if(v&&v.pop<Math.min(35,v.cap+4)&&popC[v.clan]<popLimit()){const tt=v.clan===1?'troll':(Math.random()<.55?'archer':'warrior');const nu=spawnBeing(tt,b.x,b.y+T*.8,v);if(tt==='troll')nu.role='warrior';}}
+  }else if(b.type==='barracks'){b.spawnT-=dt;if(b.spawnT<=0){b.spawnT=[40,28,20][b.lvl-1];if(v&&v.pop<Math.min(35,v.cap+4)&&popC[v.clan]<popLimit()){const tt=v.clan===1?'troll':(rand()<.55?'archer':'warrior');const nu=spawnBeing(tt,b.x,b.y+T*.8,v);if(tt==='troll')nu.role='warrior';}}
   }
  }
  builds=builds.filter(b=>!b.dead);
@@ -858,7 +978,7 @@ function tickFire(dt){
    if(bgen[i]<MAX_GEN){const x=i%COLS,y=(i/COLS)|0;
     for(let d=0;d<4;d++){const nx=x+DX[d],ny=y+DY[d];if(!inb(nx,ny))continue;const ni=ny*COLS+nx;if(burn[ni]>0)continue;
      const t=tiles[ni];const fl=treeMap.has(ni)?0.6:t===0?0.3:t===8?0.5:0;
-     if(fl&&Math.random()<fl)ignite(ni,bgen[i]+1);}}}
+     if(fl&&rand()<fl)ignite(ni,bgen[i]+1);}}}
   if(burn[i]<=0){
    fires.delete(i);burn[i]=0;
    const t=tiles[i];if(t===0||t===8||t===9||t===3&&false){tiles[i]=5;rg[i]=worldTime+rnd(80,140);}
@@ -901,11 +1021,11 @@ function spawnBearRaid(){
 }
 function plague(){
  const v=pick(villages);if(!v)return;let n=0;
- for(const u of beings){if(u.vid===v.id&&!u.leader&&Math.random()<0.12){u.hp=0;u.lastHit='чума';n++;}}
+ for(const u of beings){if(u.vid===v.id&&!u.leader&&rand()<0.12){u.hp=0;u.lastHit='чума';n++;}}
  if(n){toast('☠ Чума в '+v.name+': погибло '+n);logEv('Чума в '+v.name);}
 }
 function randomEvent(){
- const r=Math.random();
+ const r=rand();
  if(r<0.3)spawnBearRaid();
  else if(r<0.45)plague();
  else if(r<0.58)spawnDragon();
@@ -924,7 +1044,7 @@ function tickWorld(dt){
   const nS=Math.max(50,(COLS*ROWS/50)|0);for(let k=0;k<nS;k++){
    const i=randInt(0,COLS*ROWS-1),t=tiles[i];
    if(t===5&&rg[i]>0&&worldTime>rg[i]){tiles[i]=0;rg[i]=0;}
-   else if((t===0||t===8)&&trees.length<COLS*ROWS*0.14&&Math.random()<0.02){
+   else if((t===0||t===8)&&trees.length<COLS*ROWS*0.14&&rand()<0.02){
     const x=i%COLS,y=(i/COLS)|0;let near=false;
     for(let d=0;d<4;d++){if(treeMap.has((y+DY[d])*COLS+x+DX[d])){near=true;break;}}
     if(near&&inb(x,y)&&!villages.some(v=>Math.hypot(v.cx-x*T,v.cy-y*T)<T*4))plantTree(i,t===8?pick(['oak','spruce','birch']):pick(['oak','birch']));
@@ -932,7 +1052,7 @@ function tickWorld(dt){
   }
   // животные: пополнение
   const target=Math.floor(COLS*ROWS*0.014);
-  if(animals.length<target&&Math.random()<0.3){const i=randInt(0,COLS*ROWS-1);if((tiles[i]===0||tiles[i]===8)&&!blk[i])makeAnimal(pick(Object.keys(ANI)),(i%COLS)*T+13,((i/COLS)|0)*T+13);}
+  if(animals.length<target&&rand()<0.3){const i=randInt(0,COLS*ROWS-1);if((tiles[i]===0||tiles[i]===8)&&!blk[i])makeAnimal(pick(Object.keys(ANI)),(i%COLS)*T+13,((i/COLS)|0)*T+13);}
   // захват/падение деревень
   for(let k=villages.length-1;k>=0;k--){
    const v=villages[k];const hasB=builds.some(b=>b.village===v.id&&!b.dead);
@@ -956,7 +1076,7 @@ function tickLava(dt){
   let cooled=false;
   for(let k=0;k<4;k++){const nx=x+DX[k],ny=y+DY[k];if(inb(nx,ny)&&tiles[ny*COLS+nx]===1){cooled=true;break;}}
   if(cooled){tiles[i]=2;ore[i]=rollOre();mineLeft[i]=3;lavaSet.delete(i);continue;}
-  if(Math.random()<0.45){
+  if(rand()<0.45){
    const k=randInt(0,3),nx=x+DX[k],ny=y+DY[k];
    if(nx<1||ny<1||nx>=COLS-1||ny>=ROWS-1)continue;
    const ni=ny*COLS+nx,t=tiles[ni];
@@ -968,9 +1088,9 @@ function makePeace(a,b){a.wars=a.wars.filter(i=>i!==b.id);b.wars=b.wars.filter(i
 function aiDiplomacy(){
  const ks=villages.filter(v=>v.isKingdom);if(ks.length<2)return;
  const a=pick(ks),b=pick(ks);if(a===b)return;
- if(a.wars.includes(b.id)){if(Math.random()<0.4)makePeace(a,b);return;}
- if(a.allies.includes(b.id)){if(Math.random()<0.15){a.allies=a.allies.filter(i=>i!==b.id);b.allies=b.allies.filter(i=>i!==a.id);logEv('Союз '+a.name+' и '+b.name+' распался');}return;}
- if(Math.random()<0.55)declareWar(a,b);else makeAlliance(a,b);
+ if(a.wars.includes(b.id)){if(rand()<0.4)makePeace(a,b);return;}
+ if(a.allies.includes(b.id)){if(rand()<0.15){a.allies=a.allies.filter(i=>i!==b.id);b.allies=b.allies.filter(i=>i!==a.id);logEv('Союз '+a.name+' и '+b.name+' распался');}return;}
+ if(rand()<0.55)declareWar(a,b);else makeAlliance(a,b);
 }
 function step(dt){
  worldTime+=dt;playTime+=dt;
@@ -988,13 +1108,14 @@ function serialize(){
 }
 function saveGame(silent){
  if(appState!=='playing'||gameOver)return false;
- try{localStorage.setItem(SAVE_KEY,JSON.stringify(serialize()));if(!silent)toast('💾 Сохранено');return true;}catch(e){if(!silent)toast('Не удалось сохранить');return false;}
+ if(!SEC.allow('save',1000)){if(!silent)toast('Подождите секунду');return false;}
+ try{SEC.writeSave(SAVE_KEY,serialize());if(!silent)toast('💾 Сохранено');return true;}catch(e){if(!silent)toast('Не удалось сохранить');return false;}
 }
 function hasSave(){try{return !!localStorage.getItem(SAVE_KEY);}catch(e){return false;}}
-function deleteSave(){try{localStorage.removeItem(SAVE_KEY);}catch(e){console.warn('deleteSave:',e);}}
+function deleteSave(){try{localStorage.removeItem(SAVE_KEY);}catch(e){SEC.log('deleteSave:',e);}}
 function loadGame(){
- let d;try{d=JSON.parse(localStorage.getItem(SAVE_KEY));}catch(e){return false;}
- if(!d||d.v!==50)return false;
+ const d=SEC.readSave(SAVE_KEY);
+ if(!d)return false;
  try{
   allocWorld(d.cols,d.rows);
   for(let i=0;i<tiles.length;i++){tiles[i]=d.tiles.charCodeAt(i)-48;ore[i]=d.ore.charCodeAt(i)-48;mineLeft[i]=d.ml.charCodeAt(i)-48;}
@@ -1010,7 +1131,7 @@ function loadGame(){
   for(const v of villages){const l=beings.find(b=>b.leader&&b.vid===v.id);v.leaderId=l?l.id:0;}
   paused=false;gameOver=false;storm=0;eventT=rnd(120,240);
   clampCam();refreshStats();refreshCaps();buildMini();return true;
- }catch(e){console.warn('loadGame failed:',e);return false;}
+ }catch(e){SEC.log('loadGame failed:',e);return false;}
 }
 
 /* ───── камера и отрисовка ───── */
@@ -1028,7 +1149,7 @@ function cnv(w,h){const c=document.createElement('canvas');c.width=Math.max(1,Ma
 function rr(g,x,y,w,h,r){g.beginPath();g.moveTo(x+r,y);g.arcTo(x+w,y,x+w,y+h,r);g.arcTo(x+w,y+h,x,y+h,r);g.arcTo(x,y+h,x,y,r);g.arcTo(x,y,x+w,y,r);g.closePath();}
 function lin(g,x0,y0,x1,y1,st){const gr=g.createLinearGradient(x0,y0,x1,y1);for(let i=0;i<st.length;i++)gr.addColorStop(st.length===1?0:i/(st.length-1),st[i]);return gr;}
 function ball(g,x,y,r,c1,c2,c3){const gr=g.createRadialGradient(x-r*.35,y-r*.4,r*.1,x,y,r);gr.addColorStop(0,c1);gr.addColorStop(.55,c2);gr.addColorStop(1,c3);g.fillStyle=gr;g.beginPath();g.arc(x,y,r,0,6.283);g.fill();g.strokeStyle='rgba(10,40,15,.35)';g.lineWidth=.5;g.stroke();}
-function shd(hex,a){const n=parseInt(hex.slice(1),16);let r=n>>16,g=(n>>8)&255,b=n&255;const m=a>=0?255:0,k=Math.abs(a);r=Math.round(r+(m-r)*k);g=Math.round(g+(m-g)*k);b=Math.round(b+(m-b)*k);return 'rgb('+r+','+g+','+b+')';}
+function shd(hex,a){const n=Number('0x'+hex.slice(1));let r=n>>16,g=(n>>8)&255,b=n&255;const m=a>=0?255:0,k=Math.abs(a);r=Math.round(r+(m-r)*k);g=Math.round(g+(m-g)*k);b=Math.round(b+(m-b)*k);return 'rgb('+r+','+g+','+b+')';}
 const OUT='rgba(20,12,8,.55)';
 
 /* ── атлас тайлов ── */
@@ -1531,7 +1652,7 @@ BDEF.barracks=(g,L)=>{
 /* ── дракон ── */
 function dragonBreath(u,f){
  const tx=Math.floor(f.x/T),ty=Math.floor(f.y/T);
- for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){if(dx*dx+dy*dy<=5&&inb(tx+dx,ty+dy)&&Math.random()<.7)ignite((ty+dy)*COLS+tx+dx,0,4);}
+ for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++){if(dx*dx+dy*dy<=5&&inb(tx+dx,ty+dy)&&rand()<.7)ignite((ty+dy)*COLS+tx+dx,0,4);}
  for(const b of beings){if(b.dead||b===u||b.type==='dragon')continue;if(Math.hypot(b.x-f.x,b.y-f.y)<55){b.hp-=45;b.lastHit='дракон';}}
  for(const b of builds){if(!b.dead&&Math.hypot(b.x-f.x,b.y-f.y)<60)hitBuild(b,60,u);}
  for(const a of animals){if(!a.dead&&Math.hypot(a.x-f.x,a.y-f.y)<55){a.hp-=45;a.lastHit='дракон';}}
@@ -1711,7 +1832,7 @@ function paintFire(i,t){
  const X=(i%COLS)*T,Y=((i/COLS)|0)*T;
  ctx.fillStyle='rgba(30,8,0,.3)';ctx.fillRect(X,Y,T,T);
  drawFlame(X+13,Y+T-3,1.2,t,i);drawFlame(X+6,Y+T-2,.65,t,i+5);drawFlame(X+20,Y+T-4,.7,t,i+9);
- if(Math.random()<.025)sparks.push({x:X+rnd(5,21),y:Y+rnd(6,16),vx:rnd(-6,6),vy:rnd(-55,-28),t:rnd(.5,1.1),c:Math.random()<.5?'#ffb23c':'#ff6a1e',s:1.6});
+ if(rand()<.025)sparks.push({x:X+rnd(5,21),y:Y+rnd(6,16),vx:rnd(-6,6),vy:rnd(-55,-28),t:rnd(.5,1.1),c:rand()<.5?'#ffb23c':'#ff6a1e',s:1.6});
 }
 
 /* ── оружие ── */
@@ -2065,7 +2186,7 @@ function paintAnimal(a,t){
  if(Q.udder){g.fillStyle='#ecaaa8';g.beginPath();g.ellipse(-L*.18,by+H*.5,1.8,1.2,0,0,6.283);g.fill();}
  g.restore();
  // шея и голова
- const ang0=Q.ha!=null?Q.ha:.12,graze=Q.graze&&!mv?Math.max(0,Math.min(1,(Math.sin(t*.33+id*2.7)-.35)*3)):0;
+ const ang0=Q.ha!==undefined?Q.ha:.12,graze=Q.graze&&!mv?Math.max(0,Math.min(1,(Math.sin(t*.33+id*2.7)-.35)*3)):0;
  const hlr=Q.hl,nk=Q.nk;let hx=L*.44+Q.neck*.55+hlr*.6,hy=by-H*.3-Q.neck+hlr*.2;
  const hyG=Math.min(hy,-hlr*.95);hy=hy+(hyG-hy)*graze;hx+=graze*(Q.sn*.35+Q.neck*.4);
  hy+=mv?Math.sin(ph*2)*.25:0;
@@ -2120,7 +2241,7 @@ function tickSmoke(dt){
  for(const b of builds){
   if(b.dead||b.constr>0)continue;const m=BSPR[b.type+b.lvl];if(!m||!m.chim)continue;
   const bs=bsc(b);const px=b.tx*T+13+(m.chim[0]-13)*bs,py=b.ty*T+25+(m.chim[1]-25)*bs;if(px<x0||px>x1||py<y0||py>y1)continue;
-  if(Math.random()<dt*(b.type==='forge'?1.7:.9))smokes.push({x:px,y:py,vx:rnd(2,7),vy:-rnd(9,16),t:rnd(2,3.2),max:3.2,r:rnd(1.2,2),ph:rnd(6.28)});
+  if(rand()<dt*(b.type==='forge'?1.7:.9))smokes.push({x:px,y:py,vx:rnd(2,7),vy:-rnd(9,16),t:rnd(2,3.2),max:3.2,r:rnd(1.2,2),ph:rnd(6.28)});
  }
 }
 
@@ -2128,7 +2249,7 @@ function tickSmoke(dt){
 function paintHeart(h){ctx.globalAlpha=Math.min(1,h.t);ctx.fillStyle='#ff5d8f';ctx.beginPath();ctx.moveTo(h.x,h.y+5);ctx.bezierCurveTo(h.x-6,h.y,h.x-3,h.y-5,h.x,h.y-1.5);ctx.bezierCurveTo(h.x+3,h.y-5,h.x+6,h.y,h.x,h.y+5);ctx.fill();ctx.strokeStyle='rgba(120,10,40,.5)';ctx.lineWidth=.5;ctx.stroke();ctx.globalAlpha=1;}
 function paintBolt(b,t){
  const a=b.t/b.max,P=b.pts;
- if(!b.br){b.br=[];for(let q=0;q<4;q++){const j=1+(Math.random()*(P.length-3)|0);let x=P[j][0],y=P[j][1];const seg=[[x,y]];const dir=Math.random()<.5?-1:1;for(let s=0;s<3;s++){x+=dir*rnd(6,16);y+=rnd(8,22);seg.push([x,y]);}b.br.push(seg);}}
+ if(!b.br){b.br=[];for(let q=0;q<4;q++){const j=1+(rand()*(P.length-3)|0);let x=P[j][0],y=P[j][1];const seg=[[x,y]];const dir=rand()<.5?-1:1;for(let s=0;s<3;s++){x+=dir*rnd(6,16);y+=rnd(8,22);seg.push([x,y]);}b.br.push(seg);}}
  ctx.save();ctx.globalCompositeOperation='lighter';ctx.lineJoin='round';ctx.lineCap='round';
  const col=b.divine?'255,226,120':'120,180,255';
  for(const [w,al,c] of [[b.divine?22:13,.12,col],[b.divine?12:7,.3,col],[b.divine?5:3,.9,'255,255,255']]){
@@ -2304,7 +2425,7 @@ function applyTool(tl,wx,wy,drag){
  if(tl in TERRAIN_TOOLS){brushTiles(tx,ty,i=>setTileAt(i,TERRAIN_TOOLS[tl]));return;}
  if(tl==='boulder'){if(tx>0&&ty>0&&tx<COLS-1&&ty<ROWS-1)setTileAt(ty*COLS+tx,2);return;}
  if(tl==='fire'){brushTiles(tx,ty,i=>ignite(i,0));return;}
- if(tl in TREE_TOOLS){brushTiles(tx,ty,i=>{if(drag&&Math.random()<0.6)return;const t=tiles[i];if(t===0||t===8||t===3||t===9||t===5){const tr=plantTree(i,TREE_TOOLS[tl]);if(tr&&t===5)tiles[i]=0;}});return;}
+ if(tl in TREE_TOOLS){brushTiles(tx,ty,i=>{if(drag&&rand()<0.6)return;const t=tiles[i];if(t===0||t===8||t===3||t===9||t===5){const tr=plantTree(i,TREE_TOOLS[tl]);if(tr&&t===5)tiles[i]=0;}});return;}
  if(tl in BUILD_TOOLS){
   brushTiles(tx,ty,(i,x,y)=>{
    if(!canBuildAt(x,y))return;
@@ -2321,6 +2442,7 @@ function applyTool(tl,wx,wy,drag){
   });
   return;
  }
+ if((tl in BEING||tl in ANI)&&(beings.length>=2200||animals.length>=1400||!SEC.allow('spawn',20)))return;
  switch(tl){
   case 'human':{const v=nearestVillage(wx,wy,0);spawnBeing('human',wx,wy,v);break;}
   case 'warrior':{const v=nearestVillage(wx,wy,0);spawnBeing('warrior',wx,wy,v);break;}
@@ -2342,7 +2464,7 @@ function applyTool(tl,wx,wy,drag){
 function setInspect(o){
  insp=o;const el=$('inspect');
  if(!o){el.style.display='none';return;}
- el.style.display='block';const bt=$('iBtns');bt.innerHTML='';
+ el.style.display='block';const bt=$('iBtns');SEC.clear(bt);
  if(o.type==='being'&&o.ref.leader){
   for(const [id,lab] of ORDERS){const b=document.createElement('button');b.textContent=lab;b.dataset.o=id;b.onclick=()=>{const v=getV(o.ref.vid);if(v){v.order=id;toast(v.name+': '+lab);updateInspect();}};bt.appendChild(b);}
   const lv=getV(o.ref.vid);if(lv)for(const wid of lv.wars){const w=getV(wid);if(!w)continue;const b=document.createElement('button');b.textContent='🕊 Мир с '+w.name;b.onclick=()=>{makePeace(lv,w);setInspect(o);};bt.appendChild(b);}
@@ -2353,7 +2475,6 @@ function setInspect(o){
  }
  updateInspect();
 }
-const esc=x=>String(x==null?'':x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function updateInspect(){
  if(!insp)return;const r=insp.ref;
  if(r.dead){setInspect(null);return;}
@@ -2370,7 +2491,7 @@ function updateInspect(){
  }else if(insp.type==='tree'){
   h='<b>Дерево</b> ('+({oak:'дуб',apple:'яблоня',spruce:'ель',birch:'берёза',palm:'пальма',cactus:'кактус',dead:'сухое'}[r.kind])+')<br>Прочность: '+r.hp+'/3';
  }
- $('iText').innerHTML=h;
+ SEC.setHTML($('iText'),h);
 }
 function actName(a){return {idle:'отдыхает',wander:'бродит',attack:'сражается',attack_build:'штурмует здание',breed:'ищет пару',mine:'добывает руду',walk_to_mine:'идёт к руде',chop:'рубит дерево',walk_to_tree:'идёт к дереву',hunt:'охотится',raid:'в походе',betray:'замышляет злое',retreat:'отступает',defend:'в дозоре'}[a]||a;}
 function inspectAt(wx,wy){
@@ -2428,24 +2549,199 @@ function setupInput(){
  mn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();const r=mn.getBoundingClientRect();const fx=(e.clientX-r.left)/r.width,fy=(e.clientY-r.top)/r.height;camX=fx*COLS*T-W/zoom/2;camY=fy*ROWS*T-H/zoom/2;clampCam();});
 }
 
+/* ═══════════════ ИДЕИ ДЛЯ ОБНОВЛЕНИЯ 1.1 ═══════════════ */
+const IDEAS=(()=>{
+ const KEY='kubiya_ideas_v1',BAK='kubiya_ideas_bak',VKEY='kubiya_ideas_votes',DBN='kubiya_ideas_db';
+ const MAX=300,MINL=6,MAXL=280,DAY_CAP=30,TARGET='1.1';
+ /* ── фильтр плохих слов ── */
+ const LAT2CYR={a:'а',b:'в',c:'с',e:'е',h:'н',k:'к',m:'м',o:'о',p:'р',t:'т',x:'х',y:'у'};
+ const NUM2CYR={'0':'о','3':'з','4':'ч','6':'б','@':'а','$':'с'};
+ const CYR2LAT={'а':'a','в':'b','е':'e','к':'k','м':'m','н':'h','о':'o','р':'p','с':'c','т':'t','х':'x','у':'y'};
+ const LEET={'0':'o','1':'i','3':'e','4':'a','5':'s','7':'t','@':'a','$':'s','!':'i'};
+ const RU=['ху[йеяию]','пи[зс]д','пезд','[её]б(?:а|л[аоуи]|у[чнт]|н[уы]|ис|ет|ыр|ал|ан)','бл(?:я$|ят|яд|еат)','сук(?:а|и|у|е|ой|ам|ами|ин)$','сукин','сучк','сучар','муд(?:ак|ил|оз|ач)','г[ао]ндон','пид[оа]р','пидр','педик(?!юр)','залуп','шлюх','дроч','мразь','мразот','ублюд','долбо[её]б','у[её]б(?:ок|ищ|ан)','говн','говен','сра(?:ть|л|н|к)','сать$','жоп(?:а|у|е|ы|ой)$','чмо$','чмош','дебил','идиот','кретин','даун$','сволоч','гнид','выродок','лох$','ниг+ер','черножоп','жид(?:ы|ов|а|ам)?$','хохл','кацап','москал','хер$','хера$','херн','нахер','похер'].map(s=>new RegExp('^'+s));
+ const ENS=['fuck','fck','fuk','shit','bitch','biatch','asshole','arsehole','cunt','dickhead','pussy','nigg','fagg','whore','slut','bastard','wank','twat','retard','motherf','bullshit','dumbass','jackass','porn'];
+ const EN=new RegExp('^(?:'+ENS.join('|')+')');
+ const ENX=new Set(['fag','dick','cock','cum','piss','tits','anus','rape','rapist','ass','nazi']);
+ function tokens(s,map){
+  let o='';for(const ch of s){if(map[ch]!==undefined)o+=map[ch];else if(/[a-zа-я]/.test(ch)||/[0-9@$!]/.test(ch))o+=ch;else o+=' ';}
+  return o;
+ }
+ function toks(str){
+  const raw=str.split(/\s+/).filter(Boolean).map(t=>t.replace(/(.)\1+/g,'$1'));
+  const out=[];let run='';
+  for(const t of raw){if(t.length===1)run+=t;else{if(run){out.push(run);run='';}out.push(t);}}
+  if(run)out.push(run);
+  return out;
+ }
+ function profane(text){
+  const s=text.toLowerCase().replace(/ё/g,'е');
+  let c='',l='';
+  for(const ch of s){
+   if(LAT2CYR[ch])c+=LAT2CYR[ch];else if(NUM2CYR[ch])c+=NUM2CYR[ch];else if(/[а-я]/.test(ch))c+=ch;else c+=' ';
+   if(CYR2LAT[ch])l+=CYR2LAT[ch];else if(LEET[ch])l+=LEET[ch];else if(/[a-z]/.test(ch))l+=ch;else l+=' ';
+  }
+  for(const t of toks(c))for(const re of RU)if(re.test(t))return true;
+  for(const t of toks(l))if(EN.test(t)||ENX.has(t))return true;
+  return false;
+ }
+ /* ── проверка идеи ── */
+ const norm=t=>t.toLowerCase().replace(/ё/g,'е').replace(/[^a-zа-я0-9]+/g,' ').trim();
+ function check(raw,existing){
+  let t=String(raw==null?'':raw).replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim();
+  if(t.length<MINL)return {ok:false,err:'Слишком коротко — опишите идею подробнее'};
+  if(t.length>MAXL)return {ok:false,err:'Слишком длинно (максимум '+MAXL+' символов)'};
+  if((t.match(/[a-zA-Zа-яА-ЯёЁ]/g)||[]).length<4)return {ok:false,err:'Напишите идею словами'};
+  if(/(.)\1{5,}/.test(t))return {ok:false,err:'Слишком много одинаковых символов'};
+  if(/(https?:|www\.|[a-z0-9-]+\.(?:com|ru|net|org|io|me|xyz|su|ua|by|kz)\b|t\.me|@\w{3,}|\d{7,})/i.test(t))return {ok:false,err:'Ссылки, контакты и номера не принимаются'};
+  if(profane(t))return {ok:false,err:'В идее есть недопустимые слова — перефразируйте'};
+  const L=(t.match(/[a-zа-яё]/g)||[]).length,U=(t.match(/[A-ZА-ЯЁ]/g)||[]).length;
+  if(L>12&&U/(L+U)>.7){t=t.toLowerCase();}
+  t=t.charAt(0).toUpperCase()+t.slice(1);
+  const n=norm(t);if((existing||[]).some(i=>norm(i.t)===n))return {ok:false,err:'Такая идея уже есть',dup:true};
+  return {ok:true,text:t};
+ }
+ /* ── хранилище: localStorage ×2 + IndexedDB ── */
+ let list=[],voted=new Set();
+ const okItem=i=>i&&typeof i==='object'&&typeof i.id==='string'&&/^[\w-]{4,30}$/.test(i.id)&&typeof i.t==='string'&&Number.isFinite(i.d);
+ function clean(arr){
+  if(!Array.isArray(arr))return [];const seen=new Set(),out=[];
+  for(const i of arr){if(!okItem(i))continue;const r=check(i.t,null);if(!r.ok)continue;const k=norm(r.text);if(seen.has(k)||seen.has(i.id))continue;seen.add(k);seen.add(i.id);
+   out.push({id:i.id,t:r.text,d:Math.min(Math.max(0,i.d),Date.now()+864e5),v:Number.isInteger(i.v)?Math.min(9999,Math.max(0,i.v)):0,ver:TARGET});}
+  return out.slice(0,MAX);
+ }
+ function lsGet(k){try{return JSON.parse(localStorage.getItem(k));}catch(_e){return null;}}
+ function persist(){
+  const data=JSON.stringify({v:1,ideas:list});
+  try{localStorage.setItem(KEY,data);}catch(e){SEC.log('ideas ls',e);}
+  try{localStorage.setItem(BAK,data);}catch(e){SEC.log('ideas bak',e);}
+  try{localStorage.setItem(VKEY,JSON.stringify([...voted].slice(0,MAX)));}catch(e){SEC.log('ideas votes',e);}
+  idbPut({v:1,ideas:list});
+ }
+ function dbOpen(){return new Promise(res=>{try{const rq=indexedDB.open(DBN,1);rq.onupgradeneeded=()=>{rq.result.createObjectStore('kv');};rq.onerror=()=>res(null);rq.onsuccess=()=>res(rq.result);}catch(_e){res(null);}});}
+ async function idbPut(val){const db=await dbOpen();if(!db)return;try{const tx=db.transaction('kv','readwrite');tx.objectStore('kv').put(val,'ideas');tx.oncomplete=()=>db.close();tx.onerror=()=>db.close();}catch(e){db.close();}}
+ async function idbGet(){const db=await dbOpen();if(!db)return null;return new Promise(res=>{try{const rq=db.transaction('kv','readonly').objectStore('kv').get('ideas');rq.onsuccess=()=>{db.close();res(rq.result||null);};rq.onerror=()=>{db.close();res(null);};}catch(_e){db.close();res(null);}});}
+ function sortList(){list.sort((a,b)=>b.v-a.v||b.d-a.d);}
+ function merge(arr){const before=list.length;const have=new Set(list.map(i=>i.id).concat(list.map(i=>norm(i.t))));
+  for(const i of clean(arr)){if(have.has(i.id)||have.has(norm(i.t)))continue;list.push(i);}
+  list=list.slice(0,MAX);sortList();return list.length!==before;}
+ function load(){
+  const a=lsGet(KEY),b=lsGet(BAK);
+  list=clean(a&&a.ideas);merge(b&&b.ideas);
+  const vs=lsGet(VKEY);voted=new Set(Array.isArray(vs)?vs.filter(x=>typeof x==='string').slice(0,MAX):[]);
+  sortList();
+  idbGet().then(d=>{if(d&&merge(d.ideas)){persist();}else if(list.length)idbPut({v:1,ideas:list});}).catch(()=>{});
+ }
+ load();
+ /* ── действия ── */
+ function add(text){
+  if(!SEC.allow('idea',3500))return {ok:false,err:'Слишком часто — подождите пару секунд'};
+  const day=list.filter(i=>Date.now()-i.d<864e5).length;
+  if(day>=DAY_CAP)return {ok:false,err:'Лимит идей на сегодня исчерпан'};
+  if(list.length>=MAX)return {ok:false,err:'Память идей заполнена (максимум '+MAX+')'};
+  const r=check(text,list);if(!r.ok)return r;
+  const id=Date.now().toString(36)+Math.floor(rand()*1e9).toString(36);
+  list.push({id,t:r.text,d:Date.now(),v:0,ver:TARGET});sortList();persist();return {ok:true};
+ }
+ function remove(id){list=list.filter(i=>i.id!==id);voted.delete(id);persist();}
+ function vote(id){const i=list.find(x=>x.id===id);if(!i)return;if(voted.has(id)){voted.delete(id);i.v=Math.max(0,i.v-1);}else{voted.add(id);i.v=Math.min(9999,i.v+1);}sortList();persist();}
+ function exportText(){
+  const d=x=>new Date(x).toLocaleDateString('ru-RU');
+  return 'Кубия — идеи для обновления '+TARGET+' ('+list.length+')\n\n'+list.map((i,n)=>(n+1)+'. '+i.t+'  [👍 '+i.v+', '+d(i.d)+']').join('\n')+'\n';
+ }
+ function copy(){
+  const t=exportText();
+  const fb=()=>{const a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;opacity:0;left:-999px';document.body.appendChild(a);a.select();try{document.execCommand('copy');toast('📋 Скопировано');}catch(_e){toast('Не удалось скопировать');}document.body.removeChild(a);};
+  try{if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(()=>toast('📋 Скопировано'),fb);else fb();}catch(_e){fb();}
+ }
+ function download(){
+  try{const u=URL.createObjectURL(new Blob([exportText()],{type:'text/plain;charset=utf-8'}));const a=document.createElement('a');a.href=u;a.download='kubia-ideas-'+TARGET+'.txt';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(u),4000);}catch(e){toast('Не удалось скачать');}
+ }
+ /* ── интерфейс ── */
+ const el=(tag,cls,txt)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(txt!=null)e.textContent=txt;return e;};
+ function renderList(root){
+  SEC.clear(root);const n=document.querySelector('#modal .ideasN');if(n)n.textContent=String(list.length);
+  if(!list.length){root.appendChild(el('p','','Пока пусто — станьте первым! 💡'));return;}
+  for(const i of list.slice(0,120)){
+   const card=el('div','ideaCard');const body=el('div','tx');body.appendChild(document.createTextNode(i.t));
+   body.appendChild(el('div','meta',new Date(i.d).toLocaleDateString('ru-RU')+' · для '+TARGET));
+   const v=el('button',voted.has(i.id)?'on':'','👍 '+i.v);v.onclick=()=>{vote(i.id);renderList(root);};
+   const x=el('button','','🗑');x.title='Удалить';x.onclick=()=>{remove(i.id);renderList(root);};
+   card.appendChild(body);card.appendChild(v);card.appendChild(x);root.appendChild(card);
+  }
+ }
+ function open(){
+  if(typeof appState!=='undefined'&&appState==='playing'&&!paused){paused=true;pausedByMenu=true;updatePauseBtn();}
+  openModal('<h2>💡 Идеи для обновления '+TARGET+'</h2><p>Предложи, что добавить в игру. Идеи хранятся в памяти игры и не пропадают при обновлениях.</p><div class="ideasForm"></div><h3>Все идеи (<span class="ideasN">0</span>)</h3><div class="ideasList"></div><div class="row"><button class="ideasCopy">📋 Скопировать</button><button class="ideasDl">⬇ Скачать .txt</button></div><button class="full" onclick="closeModal()">Закрыть</button>');
+  const m=$('modal'),form=m.querySelector('.ideasForm'),listEl=m.querySelector('.ideasList');
+  const ta=el('textarea');ta.maxLength=MAXL;ta.rows=3;ta.placeholder='Например: добавить зиму со снегопадом и ледяными реками…';ta.setAttribute('aria-label','Ваша идея');
+  const cnt=el('div','meta','0/'+MAXL);cnt.style.cssText='font-size:11px;opacity:.6;text-align:right';
+  const msg=el('div','ideasMsg');const btn=el('button','full on','➕ Добавить идею');
+  ta.oninput=()=>{cnt.textContent=ta.value.length+'/'+MAXL;msg.textContent='';msg.className='ideasMsg';};
+  btn.onclick=()=>{const r=add(ta.value);if(r.ok){ta.value='';cnt.textContent='0/'+MAXL;msg.textContent='✅ Идея сохранена в памяти игры';msg.className='ideasMsg ok';renderList(listEl);}else{msg.textContent='⚠ '+r.err;msg.className='ideasMsg err';}};
+  form.appendChild(ta);form.appendChild(cnt);form.appendChild(msg);form.appendChild(btn);
+  m.querySelector('.ideasCopy').onclick=copy;m.querySelector('.ideasDl').onclick=download;
+  renderList(listEl);
+ }
+ return {open,add,check,profane,count:()=>list.length,list:()=>list.slice(),exportText,remove,vote};
+})();
+
+/* ═══════════════ ОФЛАЙН И АВТООБНОВЛЕНИЕ (PWA) ═══════════════ */
+const PWA=(()=>{
+ const st={ready:false,waiting:null,applying:false};
+ function banner(){
+  if(document.getElementById('updBar'))return;
+  const d=document.createElement('div');d.id='updBar';d.className='updBar';
+  const s=document.createElement('span');s.textContent='🔄 Доступна новая версия игры';
+  const b=document.createElement('button');b.textContent='Обновить';b.onclick=apply;
+  d.appendChild(s);d.appendChild(b);document.body.appendChild(d);
+ }
+ function apply(){
+  try{if(appState==='playing')saveGame(true);}catch(_e){/* сохранение не удалось — обновим всё равно */}
+  st.applying=true;
+  if(st.waiting)st.waiting.postMessage('SKIP_WAITING');else location.reload();
+ }
+ function start(){
+  if(!('serviceWorker' in navigator))return;
+  if(!(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'))return;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(st.applying)location.reload();});
+  navigator.serviceWorker.register('./sw.js',{scope:'./'}).then(reg=>{
+   const track=w=>w.addEventListener('statechange',()=>{
+    if(w.state!=='installed')return;
+    if(navigator.serviceWorker.controller){st.waiting=w;if(appState==='menu')apply();else banner();}
+    else{st.ready=true;toast('📴 Игра готова к офлайн-режиму');}
+   });
+   if(reg.waiting&&navigator.serviceWorker.controller){st.waiting=reg.waiting;banner();}
+   if(reg.installing)track(reg.installing);
+   reg.addEventListener('updatefound',()=>{if(reg.installing)track(reg.installing);});
+   navigator.serviceWorker.ready.then(()=>{st.ready=true;});
+   const chk=()=>{reg.update().catch(()=>{/* нет сети — проверим позже */});};
+   document.addEventListener('visibilitychange',()=>{if(!document.hidden)chk();});
+   setInterval(chk,30*60*1000);chk();
+  }).catch(e=>SEC.log('sw',e));
+  try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(_e){/* не поддерживается */}
+ }
+ return {start,apply,get ready(){return st.ready;}};
+})();
+
 /* ───── интерфейс ───── */
 function buildToolUI(){
- const tabs=$('tabs');tabs.innerHTML='';
+ const tabs=$('tabs');SEC.clear(tabs);
  const mk=(txt,cls,fn)=>{const b=document.createElement('button');b.textContent=txt;if(cls)b.className=cls;b.onclick=fn;tabs.appendChild(b);return b;};
  mk('🌍 Мир',tab==='world'?'on':'',()=>{tab='world';buildToolUI();});
  mk('🏗 Стройка',tab==='build'?'on':'',()=>{tab='build';buildToolUI();});
  mk('🧬 Жизнь',tab==='life'?'on':'',()=>{tab='life';buildToolUI();});
+ mk('💡 Идеи','',()=>IDEAS.open());
  for(const n of [1,2,3])mk('●'.repeat(n),brush===n?'on':'',()=>{brush=n;buildToolUI();});
  mk('↶','',undo);
- const g=$('tools');g.innerHTML='';
+ const g=$('tools');SEC.clear(g);
  for(const [id,ic,nm] of TOOLS[tab]){
-  const b=document.createElement('button');b.className='tool'+(tool===id?' on':'');b.innerHTML=ic+'<small>'+nm+'</small>';
+  const b=document.createElement('button');b.className='tool'+(tool===id?' on':'');SEC.setHTML(b,ic+'<small>'+esc(nm)+'</small>');
   b.onclick=()=>{tool=id;if(panMode)setPan(false);selVillage=null;buildToolUI();};g.appendChild(b);
  }
 }
 function setPan(v){panMode=v;$('bPan').textContent=v?'✋':'✏️';$('bPan').className=v?'':'on';toast(v?'Режим: осмотр и перетаскивание':'Режим: рисование/спавн — «'+(toolName(tool))+'»',1800);}
 function toolName(id){for(const k in TOOLS)for(const t of TOOLS[k])if(t[0]===id)return t[2];return id;}
-function openModal(html){const m=$('modal');m.innerHTML='<div class="box">'+html+'</div>';m.style.display='flex';modalOpen=true;}
+function openModal(html){const m=$('modal');SEC.setHTML(m,'<div class="box">'+html+'</div>');m.style.display='flex';modalOpen=true;}
 function closeModal(){$('modal').style.display='none';modalOpen=false;if(pausedByMenu&&appState==='playing'){paused=false;pausedByMenu=false;updatePauseBtn();}}
 function showMenu(){
  appState='menu';
@@ -2453,7 +2749,7 @@ function showMenu(){
  openModal('<h2>🏰 Кубия 1.0</h2><p>Песочница-симулятор цивилизации. Спавни существ, строй деревни, развязывай войны, кидай молнии.</p>'+
   (sv?'<button class="full on" onclick="menuContinue()">▶ Продолжить</button>':'')+
   '<h3>Новый мир</h3><div class="row">'+Object.keys(SIZES).map(k=>'<button onclick="menuNew(\''+k+'\')">'+SIZES[k][2]+'<br><small>'+SIZES[k][0]+'×'+SIZES[k][1]+'</small></button>').join('')+'</div>'+
-  (sv?'<button class="full" onclick="menuDel()">🗑 Удалить сохранение</button>':'')+'<p style="font-size:11px;opacity:.6">v'+APP_VERSION+'</p>');
+  (sv?'<button class="full" onclick="menuDel()">🗑 Удалить сохранение</button>':'')+'<button class="full" onclick="IDEAS.open()">💡 Идеи для обновления 1.1</button>'+'<p style="font-size:11px;opacity:.6">v'+APP_VERSION+'</p>');
 }
 function menuNew(k){closeModal();generateWorld(k);if(isEmpire){pickSel=playerVid;showKingdomPick();}else{playerClan=0;startPlay();}}
 function showKingdomPick(){
@@ -2461,13 +2757,13 @@ function showKingdomPick(){
  if(!ks.find(v=>v.id===pickSel))pickSel=ks[0].id;
  const sel=getV(pickSel);camX=sel.cx-W/zoom/2;camY=sel.cy-H/zoom/2;clampCam();
  openModal('<h2>👑 Выбери королевство</h2><p>Ты правишь одним из четырёх. Остальные ведут свою политику и могут объявить тебе войну.</p>'+
-  ks.map(v=>'<button class="full'+(v.id===pickSel?' on':'')+'" style="border-left:8px solid '+v.color+'" onclick="pickSel='+v.id+';showKingdomPick()">'+(v.clan?'👹':'🧑')+' '+v.name+'<br><small>'+(v.clan?'Тролли':'Люди')+'</small></button>').join('')+
-  '<button class="full on" onclick="pickGo()">▶ Играть за '+sel.name+'</button>');
+  ks.map(v=>'<button class="full'+(v.id===pickSel?' on':'')+'" style="border-left:8px solid '+esc(v.color)+'" onclick="pickSel='+v.id+';showKingdomPick()">'+(v.clan?'👹':'🧑')+' '+esc(v.name)+'<br><small>'+(v.clan?'Тролли':'Люди')+'</small></button>').join('')+
+  '<button class="full on" onclick="pickGo()">▶ Играть за '+esc(sel.name)+'</button>');
 }
 function pickGo(){const v=getV(pickSel);playerVid=v.id;playerClan=v.clan;closeModal();startPlay();}
 function showPause(){
  if(appState!=='playing')return;paused=true;pausedByMenu=true;updatePauseBtn();
- openModal('<h2>⏸ Пауза</h2><button class="full on" onclick="closeModal()">▶ Продолжить</button><button class="full" onclick="saveGame()">💾 Сохранить</button><button class="full" onclick="showSettings()">⚙️ Настройки</button><button class="full" onclick="saveGame(true);showMenu()">🏠 В главное меню</button>');
+ openModal('<h2>⏸ Пауза</h2><button class="full on" onclick="closeModal()">▶ Продолжить</button><button class="full" onclick="saveGame()">💾 Сохранить</button><button class="full" onclick="IDEAS.open()">💡 Идеи</button><button class="full" onclick="showSettings()">⚙️ Настройки</button><button class="full" onclick="saveGame(true);showMenu()">🏠 В главное меню</button>');
 }
 function menuContinue(){closeModal();if(loadGame())startPlay();else{toast('Сохранение повреждено');generateWorld('land');startPlay();}}
 function menuDel(){deleteSave();showMenu();}
@@ -2489,13 +2785,14 @@ function showShop(){
   '<button class="full" onclick="closeModal()">Закрыть</button>');
 }
 function buyUpg(k){
+ if(!(k in upg)||!SEC.allow('buy',250))return;
  if(upg[k]>=10)return;const c=shopCost(k);if(res.gold<c){toast('Не хватает золота');return;}
  res.gold-=c;upg[k]++;refreshCaps();showShop();
 }
 function showSettings(){
  openModal('<h2>⚙️ Настройки</h2><h3>Музыка</h3><div class="row">'+Mus.S.map((s,i)=>'<button class="'+(Mus.style===i?'on':'')+'" onclick="Mus.setStyle('+i+')">'+s.n+'</button>').join('')+'</div>'+
   '<h3>Мир</h3><div class="row"><button class="'+(eventsOn?'on':'')+'" onclick="eventsOn=!eventsOn;showSettings()">События: '+(eventsOn?'вкл':'выкл')+'</button></div>'+
-  '<button class="full" onclick="saveGame();closeModal()">💾 Сохранить</button>'+
+  '<h3>Офлайн</h3><p>'+(PWA.ready?'✅ Игра сохранена в браузере и работает без интернета':'⏳ Офлайн-режим включится после первой загрузки по https')+'</p><button class="full" onclick="IDEAS.open()">💡 Идеи для 1.1 ('+IDEAS.count()+')</button><button class="full" onclick="saveGame();closeModal()">💾 Сохранить</button>'+
   '<button class="full" onclick="saveGame(true);showMenu()">🏠 В главное меню</button>'+
   '<button class="full" onclick="closeModal()">Закрыть</button>');
 }
@@ -2514,7 +2811,7 @@ function uiTick(dt){
  uiT+=dt;miniT+=dt;
  if(uiT>=0.25){uiT=0;
   const f=Math.floor;
-  $('res').innerHTML='<span class="chip">🪵 '+f(res.wood[playerClan])+'/'+f(CAP.wood)+'</span><span class="chip">🪨 '+f(res.stone)+'</span><span class="chip">⛓ '+f(res.iron)+'</span><span class="chip">🥇 '+f(res.gold)+'</span><span class="chip">💎 '+f(res.diamond)+'</span><span class="chip">💚 '+f(res.emerald)+'</span><span class="chip">🍖 '+f(res.food[playerClan])+'</span><span class="chip">👥 '+popC[playerClan]+'/'+popLimit()+'</span>'+(popC[1-playerClan]?'<span class="chip">'+(playerClan?'🧑':'👹')+' '+popC[1-playerClan]+'</span>':'');
+  SEC.setHTML($('res'),'<span class="chip">🪵 '+f(res.wood[playerClan])+'/'+f(CAP.wood)+'</span><span class="chip">🪨 '+f(res.stone)+'</span><span class="chip">⛓ '+f(res.iron)+'</span><span class="chip">🥇 '+f(res.gold)+'</span><span class="chip">💎 '+f(res.diamond)+'</span><span class="chip">💚 '+f(res.emerald)+'</span><span class="chip">🍖 '+f(res.food[playerClan])+'</span><span class="chip">👥 '+popC[playerClan]+'/'+popLimit()+'</span>'+(popC[1-playerClan]?'<span class="chip">'+(playerClan?'🧑':'👹')+' '+popC[1-playerClan]+'</span>':''));
   const ph=(worldTime%DAY_LEN)/DAY_LEN;const ic=nightAmt>0.4?'🌙':nightAmt>0.05?'🌆':ph<0.25?'🌅':'☀️';
   $('clock').textContent=ic+' День '+(Math.floor(worldTime/DAY_LEN)+1)+(storm>0?' ⛈':'');
   updateInspect();
@@ -2525,7 +2822,7 @@ function uiTick(dt){
 /* ───── музыка ───── */
 const Mus={ac:null,style:0,t:2,
  S:[{n:'Луг',sc:[0,2,4,7,9],f:220,w:'sine',g:[1.2,3]},{n:'Ночь',sc:[0,3,5,7,10],f:164.8,w:'triangle',g:[2,4]},{n:'Эхо',sc:[0,2,3,7,8],f:196,w:'sine',g:[.8,2.2]},{n:'Тишина'}],
- resume(){if(!this.ac){try{const C=window.AudioContext||window.webkitAudioContext;if(C)this.ac=new C();}catch(e){console.warn('AudioContext:',e);}}if(this.ac&&this.ac.state==='suspended'){try{this.ac.resume();}catch(e){console.warn('audio resume:',e);}}},
+ resume(){if(!this.ac){try{const C=window.AudioContext||window.webkitAudioContext;if(C)this.ac=new C();}catch(e){SEC.log('AudioContext:',e);}}if(this.ac&&this.ac.state==='suspended'){try{this.ac.resume();}catch(e){SEC.log('audio resume:',e);}}},
  setStyle(i){this.style=i;this.resume();showSettings();},
  note(s){
   const a=this.ac;if(!a)return;const now=a.currentTime;
@@ -2550,7 +2847,7 @@ function loop(now){
 }
 function init(){
  cv=$('game');ctx=cv.getContext('2d');resize();initGfx();window.addEventListener('resize',resize);
- setupInput();setupButtons();buildToolUI();setPan(true);
+ setupInput();setupButtons();buildToolUI();setPan(true);PWA.start();
  document.addEventListener('visibilitychange',()=>{if(document.hidden)saveGame(true);});
  window.addEventListener('beforeunload',()=>saveGame(true));
  openModal('<h2 style="text-align:center;font-size:36px;margin:28px 0 4px">🏰 Кубия</h2><p style="text-align:center">Песочница-симулятор цивилизации<br>v'+APP_VERSION+'</p><p style="text-align:center;opacity:.6">Загрузка…</p>');
